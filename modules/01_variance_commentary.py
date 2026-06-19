@@ -16,7 +16,7 @@ from docx.enum.text import WD_ALIGN_PARAGRAPH
 
 from utils.ai_client import get_chain
 from utils.excel_parser import parse_variance_sheet, dataframe_to_text, extract_file_metadata
-from utils.chart_builder import build_all_charts, fig_to_png_bytes
+from utils.chart_builder import build_all_charts, fig_to_png_bytes, prepare_data
 from utils.base import AllProvidersExhausted
 
 
@@ -245,6 +245,18 @@ def render():
     st.dataframe(df, use_container_width=False, hide_index=True)
     st.markdown('</div>', unsafe_allow_html=True)
 
+    # ── Column detection display ──────────────────────────────────────────
+    # Shows which columns the app mapped to each role so the user can verify
+    _, detected_cols = prepare_data(df)
+    col_parts = []
+    for role, label in [("Label", "label"), ("Budget", "budget"), ("Actual", "actual")]:
+        val = detected_cols.get(label)
+        if val and not val.startswith("_"):   # skip computed columns
+            col_parts.append(f"**{role}:** {val}")
+    if col_parts:
+        st.caption("Detected columns — " + "  ·  ".join(col_parts) +
+                   "  ·  *If any column is wrong, rename it in your file and re-upload.*")
+
     st.markdown(
         '<hr style="border: none; border-top: 3px solid #d0d0d0; margin: 18px 0 20px 0;">',
         unsafe_allow_html=True,
@@ -255,12 +267,83 @@ def render():
 
     if charts:
         with st.expander("📊 Charts", expanded=True):
-            # Show in pairs: two columns per row
             for i in range(0, len(charts), 2):
                 cols_chart = st.columns(2)
                 for j, (title, fig) in enumerate(charts[i:i+2]):
                     with cols_chart[j]:
                         st.plotly_chart(fig, use_container_width=True)
+
+    st.markdown(
+        '<hr style="border: none; border-top: 3px solid #d0d0d0; margin: 18px 0 20px 0;">',
+        unsafe_allow_html=True,
+    )
+
+    # ── AI Q&A on the data ────────────────────────────────────────────────
+    # The user can ask any question about the numbers. The AI answers using
+    # only the data in the file — it cannot reference figures not present.
+    st.markdown("#### Ask a question about your data")
+    st.caption(
+        "Ask anything: 'Which line item had the biggest variance?' · "
+        "'What drove the drop in net income?' · "
+        "'Which three items should management focus on?'"
+    )
+
+    qa_col1, qa_col2 = st.columns([4, 1])
+    with qa_col1:
+        question = st.text_input(
+            "Your question",
+            placeholder="e.g. Which expenses were most over budget?",
+            label_visibility="collapsed",
+            key="qa_input",
+        )
+    with qa_col2:
+        ask_clicked = st.button("Ask AI", type="primary", use_container_width=True)
+
+    if ask_clicked and question.strip():
+        data_text = dataframe_to_text(df)
+        qa_messages = [
+            {
+                "role": "system",
+                "content": (
+                    "You are a senior FP&A analyst. Answer the user's question using only "
+                    "the financial data provided. Be specific — reference actual numbers. "
+                    "Keep the answer concise: 3-5 sentences maximum. "
+                    "Do not reference any figures not present in the data."
+                ),
+            },
+            {
+                "role": "user",
+                "content": f"FINANCIAL DATA:\n{data_text}\n\nQUESTION: {question.strip()}",
+            },
+        ]
+
+        with st.spinner("Thinking..."):
+            try:
+                chain = get_chain(st.session_state)
+                answer, model_used_qa = chain.complete(qa_messages, timeout=60)
+                # Append to Q&A history so multiple questions accumulate on screen
+                if "qa_history" not in st.session_state:
+                    st.session_state["qa_history"] = []
+                st.session_state["qa_history"].append({
+                    "question": question.strip(),
+                    "answer":   answer,
+                    "model":    model_used_qa,
+                })
+            except AllProvidersExhausted as e:
+                st.error(str(e))
+            except Exception as e:
+                st.error(f"Unexpected error: {e}")
+
+    # Display Q&A history — newest first
+    if st.session_state.get("qa_history"):
+        for item in reversed(st.session_state["qa_history"]):
+            with st.expander(f"💬 {item['question']}", expanded=True):
+                st.markdown(item["answer"])
+                st.caption(f"AI response from {item['model']}")
+
+        if st.button("Clear questions", key="clear_qa"):
+            st.session_state["qa_history"] = []
+            st.rerun()
 
     st.markdown(
         '<hr style="border: none; border-top: 3px solid #d0d0d0; margin: 18px 0 20px 0;">',
