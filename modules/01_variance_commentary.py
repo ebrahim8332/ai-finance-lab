@@ -1,9 +1,10 @@
 """
 Module 1: Variance Commentary
 
-Takes a budget vs. actual Excel file and generates structured management
-commentary tailored to a chosen audience: CFO, Board, or Operations.
-Commentary is displayed in a collapsible expander and downloadable as a Word doc.
+User uploads a budget vs. actual Excel file. App auto-detects company name and
+period from file content. Shows data table and five finance charts automatically.
+AI generates structured commentary tailored to the chosen audience.
+Output is collapsible. Download as a Word document with charts embedded.
 """
 
 import io
@@ -14,7 +15,8 @@ from docx.shared import Inches, Pt
 from docx.enum.text import WD_ALIGN_PARAGRAPH
 
 from utils.ai_client import get_chain
-from utils.excel_parser import parse_variance_sheet, dataframe_to_text
+from utils.excel_parser import parse_variance_sheet, dataframe_to_text, extract_file_metadata
+from utils.chart_builder import build_all_charts, fig_to_png_bytes
 from utils.base import AllProvidersExhausted
 
 
@@ -45,10 +47,16 @@ def _add_bold_runs(paragraph, text: str):
             paragraph.add_run(part)
 
 
-def build_word_doc(commentary_text: str, company: str, period: str, audience: str) -> bytes:
+def build_word_doc(
+    commentary_text: str,
+    company: str,
+    period: str,
+    audience: str,
+    chart_pngs: list[tuple[str, bytes]],  # list of (chart_title, png_bytes)
+) -> bytes:
     """
-    Builds a Word document from the AI commentary text.
-    Returns raw bytes so Streamlit can offer it as a download without saving to disk.
+    Builds a Word document with charts embedded above the AI commentary.
+    Returns bytes for the Streamlit download button.
     """
     doc = Document()
 
@@ -68,15 +76,31 @@ def build_word_doc(commentary_text: str, company: str, period: str, audience: st
     run.font.size = Pt(16)
     title.alignment = WD_ALIGN_PARAGRAPH.CENTER
 
-    # Subtitle
     sub = doc.add_paragraph(f'Audience: {audience}')
     sub.alignment = WD_ALIGN_PARAGRAPH.CENTER
     sub.runs[0].italic = True
     sub.runs[0].font.size = Pt(10)
 
+    # ── Charts section ────────────────────────────────────────────────────
+    if chart_pngs:
+        doc.add_paragraph()
+        charts_heading = doc.add_paragraph()
+        charts_heading.add_run('Charts').bold = True
+        charts_heading.runs[0].font.size = Pt(14)
+
+        for chart_title, png_bytes in chart_pngs:
+            if png_bytes:
+                doc.add_paragraph(chart_title).runs[0].italic = True
+                doc.add_picture(io.BytesIO(png_bytes), width=Inches(6.0))
+                doc.add_paragraph()  # spacing between charts
+
+    # ── Commentary section ────────────────────────────────────────────────
+    doc.add_paragraph()
+    comm_heading = doc.add_paragraph()
+    comm_heading.add_run('Management Commentary').bold = True
+    comm_heading.runs[0].font.size = Pt(14)
     doc.add_paragraph()
 
-    # Render commentary — parse markdown headings and bold text
     for line in commentary_text.splitlines():
         s = line.strip()
         if not s:
@@ -94,7 +118,6 @@ def build_word_doc(commentary_text: str, company: str, period: str, audience: st
             p = doc.add_paragraph()
             _add_bold_runs(p, s)
 
-    # Footer
     doc.add_paragraph()
     footer = doc.add_paragraph('AI-generated content. Review all figures before distributing.')
     footer.runs[0].italic = True
@@ -122,7 +145,6 @@ Rules:
 - Do not hallucinate. Only reference line items present in the data.
 - End with a Conclusions section that adds new synthesis, not a restatement.
 """
-
     user = f"""Write management commentary for {company} for the period: {period}.
 
 FINANCIAL DATA:
@@ -150,10 +172,10 @@ Write in paragraphs, not bullet points.
 def render():
     st.markdown("## Variance Commentary")
     st.markdown(
-        "Upload a budget vs. actual Excel file. The AI reads the numbers, "
-        "identifies key variances, and writes structured management commentary "
-        "tailored to your chosen audience. What takes an analyst 30-60 minutes "
-        "is produced in seconds. Download the result as a Word document."
+        "Upload a budget vs. actual Excel file. "
+        "The app reads the company name and reporting period directly from the file, "
+        "generates five finance charts automatically, and writes AI commentary "
+        "tailored to your chosen audience. Download everything as a Word document."
     )
 
     st.markdown(
@@ -168,9 +190,20 @@ def render():
         uploaded_file = st.file_uploader(
             "Upload your budget vs. actual file",
             type=["xlsx", "xls"],
-            help="The file should have columns: Line Item, Budget, Actual. "
-                 "Download the sample file below to see the expected format.",
+            help="Works with most Excel variance reports. Data should start in row 1 "
+                 "with column headers. If the preview looks wrong, move your data to "
+                 "the first sheet and remove any title rows above the headers.",
         )
+
+    # Extract metadata from file content as soon as a new file is uploaded
+    if uploaded_file is not None:
+        meta = extract_file_metadata(uploaded_file)
+        company_from_file = meta["company"] or uploaded_file.name.rsplit(".", 1)[0].replace("_", " ").replace("-", " ").title()
+        period_from_file  = meta["period"] or "Current Period"
+        if st.session_state.get("_last_uploaded") != uploaded_file.name:
+            st.session_state["detected_company"] = company_from_file
+            st.session_state["detected_period"]  = period_from_file
+            st.session_state["_last_uploaded"]   = uploaded_file.name
 
     with col2:
         audience = st.selectbox(
@@ -178,20 +211,14 @@ def render():
             options=["CFO", "Board", "Operations"],
             help="Changes the tone, depth, and focus of the commentary.",
         )
-        company = st.text_input("Company name", value="Meridian Corp")
-        period  = st.text_input("Reporting period", value="Q1 2026")
-
-    # ── Sample file download ──────────────────────────────────────────────
-    try:
-        with open("data/sample_variance.xlsx", "rb") as f:
-            st.download_button(
-                label="Download sample file (Meridian Corp Q1 2026)",
-                data=f,
-                file_name="sample_variance.xlsx",
-                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-            )
-    except FileNotFoundError:
-        pass
+        company = st.text_input(
+            "Company name",
+            value=st.session_state.get("detected_company", ""),
+        )
+        period = st.text_input(
+            "Reporting period",
+            value=st.session_state.get("detected_period", "Current Period"),
+        )
 
     st.markdown(
         '<hr style="border: none; border-top: 3px solid #d0d0d0; margin: 18px 0 20px 0;">',
@@ -199,21 +226,49 @@ def render():
     )
 
     if uploaded_file is None:
-        st.info("Upload a file above to generate commentary.")
+        st.info("Upload a file above to get started.")
         return
 
-    # ── Parse and preview ─────────────────────────────────────────────────
+    # ── Parse file ────────────────────────────────────────────────────────
     try:
         df = parse_variance_sheet(uploaded_file)
     except Exception as e:
-        st.error(f"Could not read the file. Make sure it is a valid Excel file. Error: {e}")
+        st.error(f"Could not read the file: {e}")
         return
 
-    with st.expander("Preview: data loaded from your file"):
-        st.dataframe(df, use_container_width=True)
+    # ── Data table (auto-visible, horizontal scroll enabled) ──────────────
+    st.markdown("**Data loaded from file:**")
+    st.markdown(
+        '<div style="overflow-x: auto;">',
+        unsafe_allow_html=True,
+    )
+    st.dataframe(df, use_container_width=False, hide_index=True)
+    st.markdown('</div>', unsafe_allow_html=True)
 
-    # ── Generate ──────────────────────────────────────────────────────────
-    if st.button("Generate commentary", type="primary", use_container_width=True):
+    st.markdown(
+        '<hr style="border: none; border-top: 3px solid #d0d0d0; margin: 18px 0 20px 0;">',
+        unsafe_allow_html=True,
+    )
+
+    # ── Charts (auto-generated from data) ─────────────────────────────────
+    charts = build_all_charts(df)
+
+    if charts:
+        with st.expander("📊 Charts", expanded=True):
+            # Show in pairs: two columns per row
+            for i in range(0, len(charts), 2):
+                cols_chart = st.columns(2)
+                for j, (title, fig) in enumerate(charts[i:i+2]):
+                    with cols_chart[j]:
+                        st.plotly_chart(fig, use_container_width=True)
+
+    st.markdown(
+        '<hr style="border: none; border-top: 3px solid #d0d0d0; margin: 18px 0 20px 0;">',
+        unsafe_allow_html=True,
+    )
+
+    # ── Generate button ───────────────────────────────────────────────────
+    if st.button("Generate AI Commentary", type="primary", use_container_width=True):
         data_text = dataframe_to_text(df)
         messages  = build_prompt(data_text, audience, period, company)
 
@@ -228,57 +283,43 @@ def render():
                 st.error(f"Unexpected error: {e}")
                 return
 
-        # Store in session state so it persists across reruns
         st.session_state["var_commentary"]  = response
         st.session_state["var_model_used"]  = model_used
         st.session_state["var_company"]     = company
         st.session_state["var_period"]      = period
         st.session_state["var_audience"]    = audience
+        st.session_state["var_charts"]      = charts  # store for Word doc
 
-    # ── Display output (persists after generation) ─────────────────────────
+    # ── Commentary output ─────────────────────────────────────────────────
     if "var_commentary" in st.session_state:
-        response    = st.session_state["var_commentary"]
-        model_used  = st.session_state["var_model_used"]
-        company_out = st.session_state["var_company"]
-        period_out  = st.session_state["var_period"]
-        audience_out= st.session_state["var_audience"]
+        response     = st.session_state["var_commentary"]
+        model_used   = st.session_state["var_model_used"]
+        company_out  = st.session_state["var_company"]
+        period_out   = st.session_state["var_period"]
+        audience_out = st.session_state["var_audience"]
+        saved_charts = st.session_state.get("var_charts", [])
 
         st.markdown(
             '<hr style="border: none; border-top: 3px solid #d0d0d0; margin: 18px 0 20px 0;">',
             unsafe_allow_html=True,
         )
 
-        # ── Collapsible AI output (open by default) ───────────────────────
         with st.expander(
             f"📋 AI Commentary — {company_out}, {period_out} ({audience_out})",
             expanded=True,
         ):
             st.markdown(response)
-            st.caption(f"AI-generated content — model: {model_used}")
+            st.caption(f"AI response from {model_used}")
 
-        # ── Download buttons ──────────────────────────────────────────────
-        col_a, col_b = st.columns(2)
+        # Export charts to PNG for Word doc
+        chart_pngs = [(title, fig_to_png_bytes(fig)) for title, fig in saved_charts]
 
-        with col_a:
-            word_bytes = build_word_doc(response, company_out, period_out, audience_out)
-            st.download_button(
-                label="⬇ Download as Word document (.docx)",
-                data=word_bytes,
-                file_name=f"{company_out.lower().replace(' ', '_')}_{period_out.lower().replace(' ', '_')}_commentary.docx",
-                mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-                use_container_width=True,
-            )
-
-        with col_b:
-            st.download_button(
-                label="⬇ Download as plain text (.txt)",
-                data=response,
-                file_name=f"{company_out.lower().replace(' ', '_')}_{period_out.lower().replace(' ', '_')}_commentary.txt",
-                mime="text/plain",
-                use_container_width=True,
-            )
-
-        st.caption(
-            "Review all AI-generated content before distributing. "
-            "Verify figures against source data."
+        word_bytes = build_word_doc(response, company_out, period_out, audience_out, chart_pngs)
+        st.download_button(
+            label="⬇ Download as Word document (.docx)",
+            data=word_bytes,
+            file_name=f"{company_out.lower().replace(' ', '_')}_{period_out.lower().replace(' ', '_')}_commentary.docx",
+            mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
         )
+
+        st.caption("Review all AI-generated content before distributing. Verify figures against source data.")

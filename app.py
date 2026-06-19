@@ -43,7 +43,7 @@ NAV_OPTIONS = [
     ("📝 Journal Entry Drafting",            "modules.02_journal_entry",          False),
     ("📋 Budget Narrative Generator",        "modules.03_budget_narrative",       False),
     ("🔍 Audit Workpaper Assistant",         "modules.04_audit_workpaper",        False),
-    ("⚖️ Reconciliation Exception Explainer","modules.05_reconciliation",         False),
+    ("⚖️ Reconciliation Explainer",           "modules.05_reconciliation",         False),
     ("📐 Financial Ratio Interpreter",       "modules.06_ratio_interpreter",      False),
     ("💬 Board Question Simulator",          "modules.07_board_questions",        False),
     ("💵 Cash Flow Commentary",              "modules.08_cashflow_commentary",    False),
