@@ -17,10 +17,8 @@ from docx.enum.text import WD_ALIGN_PARAGRAPH
 import pandas as pd
 
 from utils.ai_client import get_chain
-from utils.excel_parser import (
-    parse_variance_sheet, dataframe_to_text, extract_file_metadata,
-    is_parse_suspicious, parse_variance_sheet_robust,
-)
+from utils.excel_parser import dataframe_to_text, extract_file_metadata
+from utils.file_parser import detect_structure, extract_data
 from utils.chart_builder import build_all_charts, fig_to_png_bytes, prepare_data
 from utils.base import AllProvidersExhausted
 
@@ -267,27 +265,58 @@ def render():
         return
 
     # ── Parse file ────────────────────────────────────────────────────────
-    # Try the fast standard parser first.
-    # If it produces bad results (unnamed columns, title-as-header), fall back
-    # to AI extraction — the file is converted to text and the AI returns JSON.
+    # Step 1: AI reads only the header rows (~50 tokens) and returns a
+    # structure map — format, column indices, periods for horizontal files.
+    # Step 2: openpyxl extracts data using those exact indices (zero tokens).
     try:
         file_bytes = uploaded_file.read()
         uploaded_file.seek(0)
-        df = parse_variance_sheet(uploaded_file)
     except Exception as e:
         st.error(f"Could not read the file: {e}")
         return
 
-    if is_parse_suspicious(df):
+    with st.spinner("Detecting file structure..."):
         try:
-            df = parse_variance_sheet_robust(file_bytes)
-            st.caption("Complex file structure detected — data extracted using enhanced parser.")
+            parse_state = dict(st.session_state)
+            parse_state.pop("locked_provider_index", None)
+            chain_for_parse = get_chain(parse_state)
+            structure = detect_structure(file_bytes, chain_for_parse)
         except Exception as e:
-            st.error(
-                f"Could not parse this file: {e} "
-                "Try simplifying to four columns: Line Item, Budget, Actual, Variance %."
-            )
+            st.error(f"Could not detect file structure: {e}")
             return
+
+    # ── Period selector for horizontal (month-by-month) files ────────────
+    if structure["format"] == "horizontal" and structure["period_names"]:
+        st.info(
+            "This file has a monthly layout. "
+            "Select the period you want to analyse."
+        )
+        selected_period = st.selectbox(
+            "Select period",
+            options=structure["period_names"],
+            key="selected_period",
+        )
+        if not selected_period:
+            return
+    else:
+        selected_period = None
+
+    # ── Extract data using detected column positions ──────────────────────
+    try:
+        df = extract_data(file_bytes, structure, period=selected_period)
+        if structure["_source"] == "ai":
+            st.caption(
+                f"Structure detected automatically "
+                f"({'horizontal — ' + selected_period if selected_period else 'vertical'})."
+            )
+        else:
+            st.caption("Structure detected using keyword matching (AI unavailable).")
+    except Exception as e:
+        st.error(
+            f"Could not extract data: {e} "
+            "Try simplifying the file to four columns: Line Item, Budget, Actual, Variance %."
+        )
+        return
 
     # ── Data table (auto-visible, horizontal scroll enabled) ──────────────
     # _build_display_df formats numbers for readability.
