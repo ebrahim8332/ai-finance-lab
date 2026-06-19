@@ -102,7 +102,7 @@ class FallbackChain:
 
 
 # Cache the provider list so it is only built once per session
-@st.cache_resource
+@st.cache_resource(show_spinner=False)
 def _build_cached_providers():
     return build_chain()
 

@@ -14,10 +14,48 @@ from docx import Document
 from docx.shared import Inches, Pt
 from docx.enum.text import WD_ALIGN_PARAGRAPH
 
+import pandas as pd
+
 from utils.ai_client import get_chain
-from utils.excel_parser import parse_variance_sheet, dataframe_to_text, extract_file_metadata
+from utils.excel_parser import (
+    parse_variance_sheet, dataframe_to_text, extract_file_metadata,
+    is_parse_suspicious, parse_variance_sheet_robust,
+)
 from utils.chart_builder import build_all_charts, fig_to_png_bytes, prepare_data
 from utils.base import AllProvidersExhausted
+
+
+def _safe_md(text: str) -> str:
+    """Escapes dollar signs so Streamlit doesn't render them as LaTeX math."""
+    return text.replace("$", r"\$")
+
+
+def _build_display_df(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    Returns a formatted copy of the dataframe for screen display only.
+    The raw df (unmodified) goes to the AI and the chart builder.
+
+    Rules applied:
+    - Dollar / number columns (budget, actual, variance): comma-separated integers  e.g. 1,234
+    - Variance % columns: multiplied by 100 and shown as  e.g. 5.7%
+    - All other columns: left as-is
+    """
+    disp = df.copy()
+    for col in disp.columns:
+        col_lower = col.lower()
+        if '%' in col_lower or 'pct' in col_lower or 'percent' in col_lower:
+            disp[col] = disp[col].apply(
+                lambda v: f"{v * 100:.1f}%"
+                if pd.notna(v) and isinstance(v, (int, float))
+                else (str(v) if pd.notna(v) else "")
+            )
+        elif any(kw in col_lower for kw in ['budget', 'actual', 'variance', '$', '($k)', 'amount']):
+            disp[col] = disp[col].apply(
+                lambda v: f"{v:,.0f}"
+                if pd.notna(v) and isinstance(v, (int, float))
+                else (str(v) if pd.notna(v) else "")
+            )
+    return disp
 
 
 AUDIENCE_DESCRIPTIONS = {
@@ -226,24 +264,36 @@ def render():
     )
 
     if uploaded_file is None:
-        st.info("Upload a file above to get started.")
         return
 
     # ── Parse file ────────────────────────────────────────────────────────
+    # Try the fast standard parser first.
+    # If it produces bad results (unnamed columns, title-as-header), fall back
+    # to AI extraction — the file is converted to text and the AI returns JSON.
     try:
+        file_bytes = uploaded_file.read()
+        uploaded_file.seek(0)
         df = parse_variance_sheet(uploaded_file)
     except Exception as e:
         st.error(f"Could not read the file: {e}")
         return
 
+    if is_parse_suspicious(df):
+        try:
+            df = parse_variance_sheet_robust(file_bytes)
+            st.caption("Complex file structure detected — data extracted using enhanced parser.")
+        except Exception as e:
+            st.error(
+                f"Could not parse this file: {e} "
+                "Try simplifying to four columns: Line Item, Budget, Actual, Variance %."
+            )
+            return
+
     # ── Data table (auto-visible, horizontal scroll enabled) ──────────────
+    # _build_display_df formats numbers for readability.
+    # The raw df is kept untouched for the AI and chart builder.
     st.markdown("**Data loaded from file:**")
-    st.markdown(
-        '<div style="overflow-x: auto;">',
-        unsafe_allow_html=True,
-    )
-    st.dataframe(df, use_container_width=False, hide_index=True)
-    st.markdown('</div>', unsafe_allow_html=True)
+    st.dataframe(_build_display_df(df), use_container_width=True, hide_index=True)
 
     # ── Column detection display ──────────────────────────────────────────
     # Shows which columns the app mapped to each role so the user can verify
@@ -271,7 +321,8 @@ def render():
                 cols_chart = st.columns(2)
                 for j, (title, fig) in enumerate(charts[i:i+2]):
                     with cols_chart[j]:
-                        st.plotly_chart(fig, use_container_width=True)
+                        with st.container(border=True):
+                            st.plotly_chart(fig, use_container_width=True)
 
     st.markdown(
         '<hr style="border: none; border-top: 3px solid #d0d0d0; margin: 18px 0 20px 0;">',
@@ -338,7 +389,7 @@ def render():
     if st.session_state.get("qa_history"):
         for item in reversed(st.session_state["qa_history"]):
             with st.expander(f"💬 {item['question']}", expanded=True):
-                st.markdown(item["answer"])
+                st.markdown(_safe_md(item["answer"]))
                 st.caption(f"AI response from {item['model']}")
 
         if st.button("Clear questions", key="clear_qa"):
@@ -391,7 +442,7 @@ def render():
             f"📋 AI Commentary — {company_out}, {period_out} ({audience_out})",
             expanded=True,
         ):
-            st.markdown(response)
+            st.markdown(_safe_md(response))
             st.caption(f"AI response from {model_used}")
 
         # Export charts to PNG for Word doc

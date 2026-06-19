@@ -273,7 +273,7 @@ def chart_variance_pct(df: pd.DataFrame, cols: dict) -> go.Figure:
         y=labels,
         orientation="h",
         marker_color=bar_colors,
-        text=[f"{v:+.1f}%" for v in values],
+        text=[f"{v*100:+.1f}%" for v in values],
         textposition="outside",
         hovertemplate="<b>%{y}</b><br>Variance: %{x:+.1f}%<extra></extra>",
     ))
@@ -283,6 +283,7 @@ def chart_variance_pct(df: pd.DataFrame, cols: dict) -> go.Figure:
     fig.update_layout(
         title="Variance % by Line Item (sorted by magnitude)",
         xaxis_title="Variance %",
+        xaxis_tickformat=".1%",
         plot_bgcolor="white",
         paper_bgcolor="white",
         margin=dict(t=60, b=40, l=200, r=80),
@@ -325,8 +326,9 @@ def chart_cost_mix(df: pd.DataFrame, cols: dict) -> go.Figure:
         labels=labels,
         values=values,
         hole=0.45,
-        textinfo="label+percent",
-        textposition="outside",
+        textinfo="percent",
+        textposition="inside",
+        automargin=True,
         hovertemplate="<b>%{label}</b><br>Actual: %{value:,.0f}<br>Share: %{percent}<extra></extra>",
         marker=dict(
             colors=[
@@ -340,10 +342,17 @@ def chart_cost_mix(df: pd.DataFrame, cols: dict) -> go.Figure:
         title="Actual Cost Mix by Category",
         plot_bgcolor="white",
         paper_bgcolor="white",
-        margin=dict(t=60, b=40, l=20, r=20),
+        margin=dict(t=60, b=20, l=20, r=20),
         font=dict(family="Calibri, sans-serif", size=11),
-        legend=dict(orientation="v", yanchor="middle", y=0.5),
-        showlegend=False,
+        legend=dict(
+            orientation="v",
+            yanchor="middle",
+            y=0.5,
+            xanchor="left",
+            x=1.02,
+            font=dict(size=11),
+        ),
+        showlegend=True,
     )
     return fig
 
