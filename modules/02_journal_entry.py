@@ -17,6 +17,7 @@ import json
 import io
 from datetime import date
 import streamlit as st
+import streamlit.components.v1 as components
 from docx import Document
 from docx.shared import Pt, Inches, RGBColor
 from docx.enum.text import WD_ALIGN_PARAGRAPH
@@ -445,13 +446,15 @@ def _je_section(standard: str, company: str):
             key="je_download",
         )
 
-        copy_col.text_area(
-            "Copy to clipboard",
-            value=je_text,
-            height=68,
-            key="je_copy_area",
-            help="Select all text here (Ctrl+A) and copy to paste into your accounting system.",
-        )
+        import html as _html
+        _esc = _html.escape(je_text, quote=False)
+        with copy_col:
+            st.components.v1.html(f"""<html><body style="margin:0;padding:0;">
+<textarea id="ct" style="opacity:0.01;position:absolute;top:0;left:0;width:1px;height:1px;">{_esc}</textarea>
+<button onclick="var t=document.getElementById('ct');t.select();document.execCommand('copy');this.textContent='✓ Copied!';var b=this;setTimeout(function(){{b.textContent='📋 Copy';}},2000);"
+ style="width:100%;height:34px;cursor:pointer;border:1px solid #ddd;border-radius:6px;
+ background:white;font-size:0.82rem;font-family:sans-serif;color:#333;">📋 Copy</button>
+</body></html>""", height=42)
 
 
 # ── Learning Guide ────────────────────────────────────────────────────────
