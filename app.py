@@ -40,7 +40,7 @@ input[type="range"] {
 # To add a module: add one entry here and create the file in modules/.
 NAV_OPTIONS = [
     ("📊 Variance Commentary",               "modules.01_variance_commentary",    True),
-    ("📝 Journal Entry Drafting",            "modules.02_journal_entry",          False),
+    ("📝 Journal Entry Drafting",            "modules.02_journal_entry",          True),
     ("📋 Budget Narrative Generator",        "modules.03_budget_narrative",       False),
     ("🔍 Audit Workpaper Assistant",         "modules.04_audit_workpaper",        False),
     ("⚖️ Reconciliation Explainer",           "modules.05_reconciliation",         False),

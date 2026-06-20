@@ -380,6 +380,142 @@ def _detect_structure_fallback(file_bytes: bytes, header_text: str) -> dict:
     }
 
 
+# ── Chart of Accounts parser ─────────────────────────────────────────────
+
+_COA_DETECT_SYSTEM = """You are a spreadsheet analyst. You will receive the first few rows of a
+Chart of Accounts file. Identify which column index holds:
+  - account_code  : the account number or code (e.g. 1001, 4000-01)
+  - account_name  : the account description or name
+  - account_type  : the account type or category (Asset, Liability, Revenue, etc.) — may not exist
+
+Return ONLY valid JSON. Use null if a column is not present.
+Example: {"account_code": 0, "account_name": 1, "account_type": 2, "header_row": 0}
+All indices are 0-based integers."""
+
+
+def parse_coa(file_bytes: bytes, filename: str, chain=None) -> pd.DataFrame:
+    """
+    Parses a Chart of Accounts file (Excel or CSV).
+    Uses AI to detect column positions, falls back to keyword matching.
+
+    Returns a dataframe with columns: Account Code, Account Name, Account Type (if present).
+    Raises ValueError if the file cannot be parsed or required columns are missing.
+    """
+    import openpyxl
+
+    filename_lower = filename.lower()
+
+    # ── Read raw rows ──────────────────────────────────────────────────────
+    if filename_lower.endswith(".csv"):
+        df_raw = pd.read_csv(BytesIO(file_bytes), header=None, dtype=str)
+        all_rows = [tuple(row) for row in df_raw.values.tolist()]
+    else:
+        wb = openpyxl.load_workbook(BytesIO(file_bytes), read_only=True, data_only=True)
+        ws = wb.active
+        all_rows = list(ws.iter_rows(max_row=200, values_only=True))
+
+    if not all_rows:
+        raise ValueError("File appears to be empty.")
+
+    # Build header text for AI (first 6 rows)
+    preview_rows = all_rows[:6]
+    lines = []
+    for i, row in enumerate(preview_rows):
+        cells = [(j, str(v)) for j, v in enumerate(row) if v is not None and str(v).strip()]
+        if cells:
+            lines.append("Row{}: {}".format(i, " | ".join(f"Col{j}={v}" for j, v in cells)))
+    header_text = "\n".join(lines)
+
+    # ── AI column detection ────────────────────────────────────────────────
+    col_map = None
+    if chain:
+        try:
+            messages = [
+                {"role": "system", "content": _COA_DETECT_SYSTEM},
+                {"role": "user",   "content": f"FILE HEADER:\n{header_text}"},
+            ]
+            response, _ = chain.complete(messages, timeout=20)
+            clean = re.sub(r"```(?:json)?|```", "", response).strip()
+            match = re.search(r"\{.*\}", clean, re.DOTALL)
+            if match:
+                col_map = json.loads(match.group(0))
+        except Exception:
+            col_map = None
+
+    # ── Keyword fallback ───────────────────────────────────────────────────
+    if not col_map:
+        CODE_KW = ["code", "number", "acct", "account #", "id", "no."]
+        NAME_KW = ["name", "description", "account name", "title", "desc"]
+        TYPE_KW = ["type", "category", "class", "group", "classification"]
+
+        header_row_idx = 0
+        for i, row in enumerate(all_rows[:6]):
+            non_null = [str(c).strip().lower() for c in row if c is not None and str(c).strip()]
+            if len(non_null) >= 2:
+                header_row_idx = i
+                break
+
+        header = [str(c).strip().lower() if c is not None else "" for c in all_rows[header_row_idx]]
+
+        def _find(keywords):
+            for i, cell in enumerate(header):
+                if any(k in cell for k in keywords):
+                    return i
+            return None
+
+        col_map = {
+            "header_row":   header_row_idx,
+            "account_code": _find(CODE_KW),
+            "account_name": _find(NAME_KW),
+            "account_type": _find(TYPE_KW),
+        }
+
+    header_row = col_map.get("header_row", 0)
+    code_col   = col_map.get("account_code")
+    name_col   = col_map.get("account_name")
+    type_col   = col_map.get("account_type")
+
+    if code_col is None and name_col is None:
+        raise ValueError(
+            "Could not identify account code or name columns. "
+            "Ensure the file has columns labelled 'Account Code' and 'Account Name' (or similar)."
+        )
+
+    # ── Extract rows ───────────────────────────────────────────────────────
+    records = []
+    for row in all_rows[header_row + 1:]:
+        if not row or all(c is None for c in row):
+            continue
+
+        def _cell(col):
+            if col is None or col >= len(row):
+                return None
+            v = row[col]
+            return str(v).strip() if v is not None else None
+
+        code = _cell(code_col)
+        name = _cell(name_col)
+        acct_type = _cell(type_col)
+
+        # Skip rows where both code and name are empty
+        if not code and not name:
+            continue
+        # Skip pure header-like repeats
+        if name and name.lower() in ("account name", "description", "name"):
+            continue
+
+        records.append({
+            "Account Code": code or "",
+            "Account Name": name or code or "",
+            "Account Type": acct_type or "",
+        })
+
+    if not records:
+        raise ValueError("No account rows found. Check the file has account codes and names.")
+
+    return pd.DataFrame(records)
+
+
 # ── Data extraction ───────────────────────────────────────────────────────
 
 _FOOTER_RE = re.compile(
