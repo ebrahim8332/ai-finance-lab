@@ -437,9 +437,9 @@ def _je_section(standard: str, company: str):
         st.markdown("")
         import html as _html
         _esc = _html.escape(je_text, quote=False)
-        # Count lines to set a proportional panel height (min 180, max 340)
+        # Height: grow with content, no upper cap so nothing is cut off
         line_count = je_text.count("\n") + 1
-        panel_height = max(180, min(340, line_count * 19 + 40))
+        panel_height = max(200, line_count * 20 + 60)
         st.components.v1.html(f"""
 <html><body style="margin:0;padding:0;font-family:sans-serif;">
 <div style="position:relative;background:#f8f9fa;border:1px solid #dee2e6;
@@ -456,7 +456,7 @@ def _je_section(standard: str, company: str):
   <textarea id="jct" style="opacity:0.01;position:absolute;top:0;left:0;width:1px;height:1px;">{_esc}</textarea>
   <pre style="margin:0;font-size:0.80rem;line-height:1.55;
               font-family:'Courier New',Courier,monospace;
-              color:#212529;white-space:pre;overflow-x:auto;">{_esc}</pre>
+              color:#212529;white-space:pre-wrap;overflow-x:auto;">{_esc}</pre>
 </div>
 </body></html>""", height=panel_height)
 
