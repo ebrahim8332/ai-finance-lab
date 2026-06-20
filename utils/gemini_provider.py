@@ -9,11 +9,12 @@ DEFAULT_MODEL = "gemini-2.5-flash"
 
 class GeminiProvider(BaseProvider):
     """
-    Calls the Google Gemini API.
+    Calls the Google Gemini API using the google-genai library.
 
-    Gemini requires the system message as a separate field (system_instruction),
-    and uses "model" instead of "assistant" as the role name. This provider
-    handles both conversions so all modules can pass messages in a standard format.
+    Gemini accepts the system instruction as a separate config field and uses
+    "model" instead of "assistant" for role names. This provider handles both
+    conversions so the rest of the codebase can pass messages in the same
+    OpenAI-compatible format used for Groq.
     """
 
     def __init__(self, model_name: str | None = None):
@@ -21,18 +22,30 @@ class GeminiProvider(BaseProvider):
         self.client = genai.Client(api_key=os.getenv("GEMINI_API_KEY"))
 
     def complete(self, messages: list[dict], timeout: int = 60, temperature: float = 0.3) -> str:
+        """
+        Sends messages to Gemini and returns the response text.
+        Raises FallbackTrigger on rate limit, server errors, or timeouts.
+        Auth errors (401, 403) surface as-is — they indicate a config problem.
+        """
         try:
             return self._call(messages, timeout, temperature)
 
         except gemini_errors.ClientError as e:
+            # 429 = rate limit. 401/403 = auth/permission — surface those, don't fall back.
             if e.code in (401, 403):
-                raise  # Auth errors — surface them, don't fall back
-            raise FallbackTrigger(f"Gemini client error {e.code} on {self.model_name}: {e}") from e
+                raise
+            raise FallbackTrigger(
+                f"Gemini client error {e.code} on {self.model_name}: {e}"
+            ) from e
 
         except gemini_errors.ServerError as e:
-            raise FallbackTrigger(f"Gemini server error {e.code} on {self.model_name}") from e
+            raise FallbackTrigger(
+                f"Gemini server error {e.code} on {self.model_name}"
+            ) from e
 
         except Exception as e:
+            # Convert all other failures (timeouts, connection errors, SDK errors)
+            # to FallbackTrigger so the chain always continues rather than crashing.
             raise FallbackTrigger(
                 f"Gemini unexpected error ({type(e).__name__}) on {self.model_name}: {e}"
             ) from e

@@ -143,9 +143,24 @@ def detect_structure(file_bytes: bytes, chain) -> dict:
             raise ValueError("No JSON object found in AI response.")
         structure = json.loads(match.group(0))
 
-        # Add convenience period_names list for horizontal files
+        # Normalise: ensure all top-level keys always exist regardless of format
+        structure.setdefault("budget_col",       None)
+        structure.setdefault("actual_col",       None)
+        structure.setdefault("variance_col",     None)
+        structure.setdefault("variance_pct_col", None)
+        structure.setdefault("periods",          [])
+        structure.setdefault("label_col",        0)
+        structure.setdefault("header_row",       0)
+
+        # Normalise period dicts — ensure all expected keys exist
+        for p in structure["periods"]:
+            p.setdefault("budget_col",       None)
+            p.setdefault("actual_col",       None)
+            p.setdefault("variance_col",     None)
+            p.setdefault("variance_pct_col", None)
+
         if structure.get("format") == "horizontal":
-            structure["period_names"] = [p["name"] for p in structure.get("periods", [])]
+            structure["period_names"] = [p["name"] for p in structure["periods"]]
         else:
             structure["period_names"] = []
 
@@ -216,6 +231,42 @@ def _validate_structure(structure: dict, file_bytes: bytes) -> dict:
         for period in structure.get("periods", []):
             period["budget_col"] = best_col(period.get("budget_col"), BUDGET_KW)
             period["actual_col"] = best_col(period.get("actual_col"), ACTUAL_KW)
+
+        # Detect "fake horizontal": AI treats column headers (Prior Year, Budget, Actual)
+        # as period names instead of recognising the file as vertical.
+        # Signal: every period name is a finance label, not a time period.
+        # Time periods contain digits (year) or month/quarter keywords.
+        TIME_MARKERS = ["jan","feb","mar","apr","may","jun","jul","aug","sep","oct",
+                        "nov","dec","q1","q2","q3","q4","h1","h2","fy ","ytd","20"]
+        def _is_time_period(name: str) -> bool:
+            low = name.lower()
+            return any(m in low for m in TIME_MARKERS)
+
+        periods = structure.get("periods", [])
+        no_time_periods = periods and all(
+            not _is_time_period(p.get("name", "")) for p in periods
+        )
+        if no_time_periods:
+            # Rebuild as vertical: scan the header row for budget/actual keywords
+            budget_idx = None
+            actual_idx = None
+            varpct_idx = None
+            for i, cell in enumerate(header):
+                if cell is None:
+                    continue
+                low = str(cell).lower()
+                if budget_idx is None and any(k in low for k in BUDGET_KW):
+                    budget_idx = i
+                elif actual_idx is None and any(k in low for k in ACTUAL_KW):
+                    actual_idx = i
+                elif varpct_idx is None and any(k in low for k in VARPCT_KW):
+                    varpct_idx = i
+            structure["format"]          = "vertical"
+            structure["budget_col"]       = budget_idx
+            structure["actual_col"]       = actual_idx
+            structure["variance_pct_col"] = varpct_idx
+            structure["periods"]          = []
+            structure["period_names"]     = []
 
     return structure
 

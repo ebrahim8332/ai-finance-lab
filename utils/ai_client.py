@@ -13,7 +13,6 @@ Usage in any module:
 """
 
 import os
-import streamlit as st
 
 from utils.base import BaseProvider, FallbackTrigger, AllProvidersExhausted
 from utils.groq_provider import GroqProvider, TIER1_MODEL, TIER2_MODEL, TIER3_MODEL, TIER4_MODEL, TIER5_MODEL
@@ -26,17 +25,17 @@ def build_chain() -> list[BaseProvider]:
     Builds the ordered list of providers based on available API keys.
 
     Order when both keys are present:
-      [0]  gemini-2.5-pro          (best quality)
+      [0]  gemini-2.5-pro
       [1]  gemini-2.5-flash
       [2]  gemini-2.0-flash
       [3]  gemini-2.0-flash-lite
       [4]  gemini-2.5-flash-lite
       [5]  gemini-flash-latest
-      [6]  llama-3.3-70b-versatile (Groq Tier 1)
-      [7]  llama-4-scout            (Groq Tier 2)
-      [8]  qwen3-32b                (Groq Tier 3)
-      [9]  gpt-oss-120b             (Groq Tier 4)
-      [10] llama-3.1-8b-instant     (Groq Tier 5 — last resort)
+      [6]  llama-3.3-70b-versatile     (Groq Tier 1)
+      [7]  llama-4-scout                (Groq Tier 2)
+      [8]  qwen3-32b                    (Groq Tier 3)
+      [9]  gpt-oss-120b                 (Groq Tier 4)
+      [10] llama-3.1-8b-instant         (Groq Tier 5 — last resort)
     """
     providers: list[BaseProvider] = [
         GroqProvider(TIER1_MODEL),
@@ -63,8 +62,11 @@ def build_chain() -> list[BaseProvider]:
 
 class FallbackChain:
     """
-    Tries providers in order. Locks to the first one that succeeds.
-    Re-locks if the locked model fails mid-session.
+    Tries each provider in order. Locks to the first one that succeeds.
+
+    If the locked provider fails on a later call (e.g. mid-session rate limit),
+    the chain continues from that point and re-locks to the next provider that
+    succeeds. Only raises AllProvidersExhausted when every remaining provider fails.
     """
 
     def __init__(self, providers: list[BaseProvider], session_state: dict):
@@ -89,8 +91,9 @@ class FallbackChain:
 
         details = " | ".join(errors[-3:])
         raise AllProvidersExhausted(
-            "All AI models are currently unavailable. Please try again in a few minutes."
-            + (f" Details: {details}" if details else "")
+            "All available models are currently rate-limited or unavailable. "
+            "Please try again in a few minutes."
+            + (f" Last attempts: {details}" if details else "")
         )
 
     @property
@@ -101,13 +104,7 @@ class FallbackChain:
         return None
 
 
-# Cache the provider list so it is only built once per session
-@st.cache_resource(show_spinner=False)
-def _build_cached_providers():
-    return build_chain()
-
-
 def get_chain(session_state: dict) -> FallbackChain:
     """Call this from any module to get a ready-to-use chain."""
-    providers = _build_cached_providers()
+    providers = build_chain()
     return FallbackChain(providers, session_state)
