@@ -334,7 +334,8 @@ def _je_section(standard: str, company: str):
 
     btn_cols = st.columns([2, 1, 4])
     generate_clicked = btn_cols[0].button("Generate Journal Entry", type="primary", key="je_generate")
-    if st.session_state.get("je_result") and btn_cols[1].button("New Entry", key="je_clear"):
+    has_result = bool(st.session_state.get("je_result"))
+    if btn_cols[1].button("New Entry", key="je_clear", disabled=not has_result):
         st.session_state["_je_clear"] = True
         st.rerun(scope="fragment")
 
