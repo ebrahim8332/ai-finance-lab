@@ -303,6 +303,12 @@ def _coa_section():
 def _je_section(standard: str, company: str):
     """Transaction input, Generate button, output display, and downloads."""
 
+    # Clear flag — must be handled before any widget is created
+    if st.session_state.pop("_je_clear", False):
+        st.session_state["je_input"] = ""
+        for k in ("je_result", "je_model", "je_word_bytes", "je_text"):
+            st.session_state.pop(k, None)
+
     st.markdown("#### Transaction")
 
     # Transaction library — click to pre-fill
@@ -326,7 +332,13 @@ def _je_section(standard: str, company: str):
         ),
     )
 
-    if st.button("Generate Journal Entry", type="primary", key="je_generate"):
+    btn_cols = st.columns([2, 1, 4])
+    generate_clicked = btn_cols[0].button("Generate Journal Entry", type="primary", key="je_generate")
+    if st.session_state.get("je_result") and btn_cols[1].button("New Entry", key="je_clear"):
+        st.session_state["_je_clear"] = True
+        st.rerun(scope="fragment")
+
+    if generate_clicked:
         if not description or not description.strip():
             st.warning("Please describe a transaction before generating.")
             st.stop()
