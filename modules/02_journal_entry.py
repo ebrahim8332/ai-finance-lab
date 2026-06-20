@@ -433,28 +433,38 @@ def _je_section(standard: str, company: str):
             "AI output — review all account codes, amounts, and treatments before posting."
         )
 
-        # Downloads
+        # Plain text view + copy button
         st.markdown("")
-        dl_col, copy_col, _ = st.columns([2, 2, 4])
+        st.markdown("**Plain text (for pasting into your accounting system)**")
+        text_col, btn_col = st.columns([9, 1])
+        with text_col:
+            st.text_area(
+                label="je_plain_text",
+                value=je_text,
+                height=220,
+                label_visibility="collapsed",
+                key="je_text_display",
+            )
+        with btn_col:
+            import html as _html
+            _esc = _html.escape(je_text, quote=False)
+            st.components.v1.html(f"""<html><body style="margin:0;padding:0;">
+<textarea id="ct" style="opacity:0.01;position:absolute;top:0;left:0;width:1px;height:1px;">{_esc}</textarea>
+<button onclick="var t=document.getElementById('ct');t.select();document.execCommand('copy');this.textContent='✓';var b=this;setTimeout(function(){{b.textContent='📋 Copy';}},2000);"
+ style="width:100%;height:34px;cursor:pointer;border:1px solid #ddd;border-radius:6px;
+ background:white;font-size:0.82rem;font-family:sans-serif;color:#333;">📋 Copy</button>
+</body></html>""", height=42)
 
+        # Download button
+        st.markdown("")
         filename = f"JE_{date.today().strftime('%Y-%m-%d')}.docx"
-        dl_col.download_button(
+        st.download_button(
             label="Download Word doc",
             data=word_bytes,
             file_name=filename,
             mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
             key="je_download",
         )
-
-        import html as _html
-        _esc = _html.escape(je_text, quote=False)
-        with copy_col:
-            st.components.v1.html(f"""<html><body style="margin:0;padding:0;">
-<textarea id="ct" style="opacity:0.01;position:absolute;top:0;left:0;width:1px;height:1px;">{_esc}</textarea>
-<button onclick="var t=document.getElementById('ct');t.select();document.execCommand('copy');this.textContent='✓ Copied!';var b=this;setTimeout(function(){{b.textContent='📋 Copy';}},2000);"
- style="width:100%;height:34px;cursor:pointer;border:1px solid #ddd;border-radius:6px;
- background:white;font-size:0.82rem;font-family:sans-serif;color:#333;">📋 Copy</button>
-</body></html>""", height=42)
 
 
 # ── Learning Guide ────────────────────────────────────────────────────────
