@@ -244,63 +244,66 @@ def _fmt(value: float, sign: bool = False) -> str:
 
 def chart_waterfall_bridge(groups: dict) -> go.Figure:
     """
-    CFO-standard bridge waterfall anchored on total Revenue budget.
+    EBITDA bridge waterfall — industry-standard CFO/board format.
 
-    Start bar: Total Revenue Budget (absolute, always positive and easy to read)
-    Middle bars: variance per category — how much each category helped or hurt
-    End bar: Total Revenue Actual (absolute total)
+    EBITDA = Revenue - COGS - Opex  (excludes interest, tax, depreciation in Other)
 
-    Sign convention:
-    - Revenue: positive variance (more revenue) = favorable = green
-    - COGS / Opex / Other: negative variance (less cost) = favorable = green
+    Structure:
+      Start bar:   EBITDA Budget  (absolute, gray)
+      Middle bars: variance contribution per category (relative, green/red)
+                   Revenue: above budget = green (more revenue lifts EBITDA)
+                   COGS:    below budget = green (less cost lifts EBITDA)
+                   Opex:    below budget = green (less cost lifts EBITDA)
+      End bar:     EBITDA Actual  (total, gray)
+
+    Each relative bar shows how much that category moved EBITDA up or down.
+    Bars connect as a staircase — the standard bridge chart pattern.
     """
     if not groups:
         return None
 
-    rev       = groups.get("Revenue", {"budget": 0, "actual": 0})
-    cost_cats = [groups[c] for c in ["COGS", "Opex", "Other"] if c in groups]
+    def _g(cat):
+        return groups.get(cat, {"budget": 0.0, "actual": 0.0})
 
-    total_rev_b  = rev["budget"]
-    total_rev_a  = rev["actual"]
-    total_cost_b = sum(c["budget"] for c in cost_cats)
-    total_cost_a = sum(c["actual"] for c in cost_cats)
+    rev  = _g("Revenue")
+    cogs = _g("COGS")
+    opex = _g("Opex")
 
-    # Anchor: Revenue budget. End: Revenue actual.
-    # Each cost category bar shows its variance contribution (less cost = positive bar).
-    # Revenue bar shows its own variance.
-    anchor = total_rev_b
-    end    = total_rev_a
+    # EBITDA = Revenue - COGS - Opex
+    ebitda_budget = rev["budget"] - cogs["budget"] - opex["budget"]
+    ebitda_actual = rev["actual"] - cogs["actual"] - opex["actual"]
 
-    labels   = ["Rev Budget"]
-    values   = [anchor]
+    labels   = ["EBITDA Budget"]
+    values   = [ebitda_budget]
     measures = ["absolute"]
-    texts    = [_fmt(anchor)]
-    colors   = [SUBTOTAL_COLOR]
+    texts    = [_fmt(ebitda_budget)]
 
-    for cat in CATEGORY_ORDER:
+    # Each category bar: how much did this variance move EBITDA?
+    # Revenue: more revenue = EBITDA goes up → delta = actual - budget, positive = green
+    # COGS:    less cost    = EBITDA goes up → delta = budget - actual, positive = green
+    # Opex:    less cost    = EBITDA goes up → delta = budget - actual, positive = green
+    ebitda_cats = [
+        ("Revenue", rev,  "Revenue Δ",  1),   # multiplier +1: revenue variance flows through directly
+        ("COGS",    cogs, "COGS Δ",    -1),   # multiplier -1: cost goes up → EBITDA goes down
+        ("Opex",    opex, "Opex Δ",    -1),
+    ]
+
+    for cat, g, label, mult in ebitda_cats:
         if cat not in groups:
             continue
-        g         = groups[cat]
-        raw_delta = g["actual"] - g["budget"]
+        raw_delta   = g["actual"] - g["budget"]   # positive = actual higher than budget
+        ebitda_move = raw_delta * mult             # how this flows to EBITDA
+        favorable   = ebitda_move >= 0
 
-        if cat == "Revenue":
-            delta     = raw_delta       # more revenue = positive = green
-            favorable = delta >= 0
-        else:
-            delta     = -raw_delta      # less cost = positive bar = green
-            favorable = delta >= 0
-
-        labels.append(f"{cat} Δ")
-        values.append(delta)
+        labels.append(label)
+        values.append(ebitda_move)
         measures.append("relative")
-        texts.append(_fmt(raw_delta, sign=True))
-        colors.append(FAVORABLE_COLOR if favorable else UNFAVORABLE_COLOR)
+        texts.append(_fmt(raw_delta, sign=True))  # label shows raw variance for clarity
 
-    labels.append("Rev Actual")
-    values.append(end)
+    labels.append("EBITDA Actual")
+    values.append(ebitda_actual)
     measures.append("total")
-    texts.append(_fmt(end))
-    colors.append(SUBTOTAL_COLOR)
+    texts.append(_fmt(ebitda_actual))
 
     fig = go.Figure(go.Waterfall(
         name="",
@@ -311,7 +314,7 @@ def chart_waterfall_bridge(groups: dict) -> go.Figure:
         text=texts,
         textposition="outside",
         textfont=dict(size=11),
-        connector={"line": {"color": "#cccccc", "width": 1}},
+        connector={"line": {"color": "#cccccc", "width": 1, "dash": "dot"}},
         increasing={"marker": {"color": FAVORABLE_COLOR}},
         decreasing={"marker": {"color": UNFAVORABLE_COLOR}},
         totals={"marker":    {"color": SUBTOTAL_COLOR}},
@@ -320,42 +323,53 @@ def chart_waterfall_bridge(groups: dict) -> go.Figure:
 
     fig.update_layout(
         title=dict(
-            text="Variance Bridge — Budget to Actual<br>"
+            text="EBITDA Bridge — Budget to Actual<br>"
                  "<sup style='color:#888;font-size:11px'>"
-                 "Green = favorable impact. "
-                 "Revenue: above budget = green. "
-                 "Costs: below budget = green.</sup>",
+                 "Green = favorable EBITDA impact. "
+                 "Revenue above budget = green. "
+                 "COGS / Opex below budget = green.</sup>",
             x=0,
         ),
-        yaxis_title="Amount ($)",
+        yaxis_title="EBITDA ($)",
         plot_bgcolor="white",
         paper_bgcolor="white",
-        margin=dict(t=80, b=60, l=80, r=40),
+        margin=dict(t=80, b=60, l=80, r=60),
         font=dict(family="Calibri, sans-serif", size=12),
         showlegend=False,
     )
-    # Format y-axis ticks with M/K suffix
-    all_vals = [v for v in values if v is not None]
-    max_val  = max(abs(v) for v in all_vals) if all_vals else 1
-    if max_val >= 1_000_000:
+
+    # Y-axis: auto-scale to cover full EBITDA range including delta bars
+    # Use the running cumulative to find the true min/max the bars reach
+    running = ebitda_budget
+    y_vals  = [ebitda_budget]
+    for cat, g, label, mult in ebitda_cats:
+        if cat not in groups:
+            continue
+        running += (g["actual"] - g["budget"]) * mult
+        y_vals.append(running)
+    y_vals.append(ebitda_actual)
+
+    y_min = min(y_vals)
+    y_max = max(y_vals)
+    span  = max(abs(y_max - y_min), abs(y_max), abs(y_min), 1)
+    pad   = span * 0.20
+
+    if span >= 1_000_000:
         tick_div, tick_suffix = 1_000_000, "M"
-    elif max_val >= 1_000:
+    elif span >= 1_000:
         tick_div, tick_suffix = 1_000, "K"
     else:
         tick_div, tick_suffix = 1, ""
 
+    y_lo = (y_min - pad)
+    y_hi = (y_max + pad)
+
     fig.update_xaxes(showgrid=False)
     fig.update_yaxes(
         showgrid=True, gridcolor="#eeeeee",
-        zeroline=True, zerolinecolor="#aaaaaa",
-        tickvals=[i * tick_div for i in range(
-            int(-(max_val * 1.2) // tick_div),
-            int((max_val * 1.2) // tick_div) + 2
-        )],
-        ticktext=[f"{i}{tick_suffix}" for i in range(
-            int(-(max_val * 1.2) // tick_div),
-            int((max_val * 1.2) // tick_div) + 2
-        )],
+        zeroline=True, zerolinecolor="#aaaaaa", zerolinewidth=1.5,
+        range=[y_lo, y_hi],
+        tickformat=f",.0f",
     )
     return fig
 
