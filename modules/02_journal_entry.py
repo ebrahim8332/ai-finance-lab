@@ -437,28 +437,27 @@ def _je_section(standard: str, company: str):
         st.markdown("")
         import html as _html
         _esc = _html.escape(je_text, quote=False)
-        # Height: grow with content, no upper cap so nothing is cut off
-        line_count = je_text.count("\n") + 1
-        panel_height = max(200, line_count * 20 + 60)
         st.components.v1.html(f"""
 <html><body style="margin:0;padding:0;font-family:sans-serif;">
 <div style="position:relative;background:#f8f9fa;border:1px solid #dee2e6;
-            border-radius:8px;padding:16px 16px 12px 16px;">
-  <button onclick="var t=document.getElementById('jct');t.select();
-                   document.execCommand('copy');
-                   this.textContent='✓ Copied!';
-                   var b=this;setTimeout(function(){{b.textContent='📋 Copy';}},2000);"
-    style="position:absolute;top:10px;right:10px;
-           padding:4px 12px;cursor:pointer;
-           border:1px solid #ced4da;border-radius:5px;
-           background:white;font-size:0.78rem;
-           font-family:sans-serif;color:#495057;">📋 Copy</button>
+            border-radius:8px;padding:16px 16px 12px 16px;
+            max-height:380px;overflow-y:auto;">
+  <div style="position:sticky;top:0;text-align:right;margin-bottom:4px;">
+    <button onclick="var t=document.getElementById('jct');t.select();
+                     document.execCommand('copy');
+                     this.textContent='✓ Copied!';
+                     var b=this;setTimeout(function(){{b.textContent='📋 Copy';}},2000);"
+      style="padding:4px 12px;cursor:pointer;
+             border:1px solid #ced4da;border-radius:5px;
+             background:white;font-size:0.78rem;
+             font-family:sans-serif;color:#495057;">📋 Copy</button>
+  </div>
   <textarea id="jct" style="opacity:0.01;position:absolute;top:0;left:0;width:1px;height:1px;">{_esc}</textarea>
   <pre style="margin:0;font-size:0.80rem;line-height:1.55;
               font-family:'Courier New',Courier,monospace;
-              color:#212529;white-space:pre-wrap;overflow-x:auto;">{_esc}</pre>
+              color:#212529;white-space:pre-wrap;">{_esc}</pre>
 </div>
-</body></html>""", height=panel_height)
+</body></html>""", height=420)
 
         # Download button
         st.markdown("")
