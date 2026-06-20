@@ -381,6 +381,8 @@ def _je_section(standard: str, company: str):
                 st.error(f"Could not generate journal entry: {e}")
                 return
 
+        st.rerun(scope="fragment")
+
     # ── Output display ─────────────────────────────────────────────────────
     je         = st.session_state.get("je_result")
     model_name = st.session_state.get("je_model", "")
