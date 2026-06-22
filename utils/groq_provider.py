@@ -10,6 +10,7 @@ TIER2_MODEL = "meta-llama/llama-4-scout-17b-16e-instruct"
 TIER3_MODEL = "qwen/qwen3-32b"
 TIER4_MODEL = "openai/gpt-oss-120b"
 TIER5_MODEL = "llama-3.1-8b-instant"
+TIER6_MODEL = "openai/gpt-oss-20b"                     # smaller/faster sibling to 120B, last Groq resort
 
 
 class GroqProvider(BaseProvider):

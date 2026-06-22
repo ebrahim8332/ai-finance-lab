@@ -15,7 +15,7 @@ Usage in any module:
 import os
 
 from utils.base import BaseProvider, FallbackTrigger, AllProvidersExhausted
-from utils.groq_provider import GroqProvider, TIER1_MODEL, TIER2_MODEL, TIER3_MODEL, TIER4_MODEL, TIER5_MODEL
+from utils.groq_provider import GroqProvider, TIER1_MODEL, TIER2_MODEL, TIER3_MODEL, TIER4_MODEL, TIER5_MODEL, TIER6_MODEL
 
 SESSION_LOCK_KEY = "locked_provider_index"
 
@@ -26,16 +26,19 @@ def build_chain() -> list[BaseProvider]:
 
     Order when both keys are present:
       [0]  gemini-2.5-pro
-      [1]  gemini-2.5-flash
-      [2]  gemini-2.0-flash
-      [3]  gemini-2.0-flash-lite
+      [1]  gemini-3-flash-preview
+      [2]  gemini-3.1-flash-lite
+      [3]  gemini-2.5-flash
       [4]  gemini-2.5-flash-lite
-      [5]  gemini-flash-latest
-      [6]  llama-3.3-70b-versatile     (Groq Tier 1)
-      [7]  llama-4-scout                (Groq Tier 2)
-      [8]  qwen3-32b                    (Groq Tier 3)
-      [9]  gpt-oss-120b                 (Groq Tier 4)
-      [10] llama-3.1-8b-instant         (Groq Tier 5 — last resort)
+      [5]  gemini-2.0-flash            (deprecated June 2026, 8K output cap)
+      [6]  gemini-2.0-flash-lite       (deprecated June 2026, 8K output cap)
+      [7]  llama-3.3-70b-versatile     (Groq Tier 1)
+      [8]  llama-4-scout               (Groq Tier 2)
+      [9]  qwen3-32b                   (Groq Tier 3)
+      [10] gpt-oss-120b                (Groq Tier 4)
+      [11] llama-3.1-8b-instant        (Groq Tier 5)
+      [12] gpt-oss-20b                 (Groq Tier 6)
+      [13] gemini-flash-latest         (unstable alias — absolute last resort)
     """
     providers: list[BaseProvider] = [
         GroqProvider(TIER1_MODEL),
@@ -43,19 +46,23 @@ def build_chain() -> list[BaseProvider]:
         GroqProvider(TIER3_MODEL),
         GroqProvider(TIER4_MODEL),
         GroqProvider(TIER5_MODEL),
+        GroqProvider(TIER6_MODEL),
     ]
 
     if os.getenv("GEMINI_API_KEY"):
         from utils.gemini_provider import GeminiProvider
         for model in reversed([
             "gemini-2.5-pro",
+            "gemini-3-flash-preview",
+            "gemini-3.1-flash-lite",
             "gemini-2.5-flash",
+            "gemini-2.5-flash-lite",
             "gemini-2.0-flash",
             "gemini-2.0-flash-lite",
-            "gemini-2.5-flash-lite",
-            "gemini-flash-latest",
         ]):
             providers.insert(0, GeminiProvider(model))
+        # gemini-flash-latest is an unstable alias — appended last, after all Groq models
+        providers.append(GeminiProvider("gemini-flash-latest"))
 
     return providers
 
