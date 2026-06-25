@@ -82,10 +82,8 @@ class FallbackChain:
 
     def complete(self, messages: list[dict], timeout: int = 90) -> tuple[str, str]:
         """Returns (response_text, model_name) from the first provider that succeeds."""
-        start_index = self.session_state.get(SESSION_LOCK_KEY) or 0
-
         errors = []
-        for i in range(start_index, len(self.providers)):
+        for i in range(len(self.providers)):
             provider = self.providers[i]
             try:
                 response = provider.complete(messages, timeout=timeout)
