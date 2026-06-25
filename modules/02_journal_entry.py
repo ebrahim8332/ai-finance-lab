@@ -277,6 +277,8 @@ def _coa_section():
         if cache_key not in st.session_state:
             with st.spinner("Reading chart of accounts..."):
                 try:
+                    st.session_state.pop("locked_provider_index", None)
+                    st.session_state.pop("_fallback_errors", None)
                     chain = get_chain(st.session_state)
                     coa_df = parse_coa(uploaded.read(), uploaded.name, chain)
                     st.session_state[cache_key]        = coa_df
@@ -350,6 +352,8 @@ def _je_section(standard: str, company: str):
 
         with st.spinner("Drafting journal entry..."):
             try:
+                st.session_state.pop("locked_provider_index", None)
+                st.session_state.pop("_fallback_errors", None)
                 chain = get_chain(st.session_state)
                 prompt = _build_je_prompt(description, standard, company, coa_df)
                 messages = [

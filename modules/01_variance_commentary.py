@@ -335,6 +335,8 @@ def _qa_section(df):
         ]
         with st.spinner("Thinking..."):
             try:
+                st.session_state.pop("locked_provider_index", None)
+                st.session_state.pop("_fallback_errors", None)
                 chain = get_chain(st.session_state)
                 answer, model_used_qa = chain.complete(qa_messages, timeout=60)
                 if "qa_history" not in st.session_state:
@@ -367,6 +369,8 @@ def _commentary_section(df, audience, period, company, charts):
         messages  = build_prompt(data_text, audience, period, company)
         with st.spinner("Analysing variances and writing commentary..."):
             try:
+                st.session_state.pop("locked_provider_index", None)
+                st.session_state.pop("_fallback_errors", None)
                 chain = get_chain(st.session_state)
                 response, model_used = chain.complete(messages, timeout=120)
             except AllProvidersExhausted as e:
@@ -434,6 +438,8 @@ def _process_file(file_bytes: bytes, filename: str) -> dict | None:
     if cache_key in st.session_state:
         return st.session_state[cache_key]
 
+    st.session_state.pop("locked_provider_index", None)
+    st.session_state.pop("_fallback_errors", None)
     chain = get_chain(st.session_state)
 
     # Step 1: detect structure (AI call — ~50 tokens)
