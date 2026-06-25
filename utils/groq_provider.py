@@ -6,7 +6,7 @@ from utils.base import BaseProvider, FallbackTrigger
 
 # Groq models used in the fallback chain, ordered by preference.
 TIER1_MODEL = "llama-3.3-70b-versatile"
-TIER2_MODEL = "meta-llama/llama-4-scout-17b-16e-instruct"
+TIER2_MODEL = "qwen/qwen3.6-27b"
 TIER3_MODEL = "qwen/qwen3-32b"
 TIER4_MODEL = "openai/gpt-oss-120b"
 TIER5_MODEL = "llama-3.1-8b-instant"
@@ -70,4 +70,10 @@ class GroqProvider(BaseProvider):
             temperature=temperature,
             timeout=timeout,
         )
-        return response.choices[0].message.content
+        text = response.choices[0].message.content or ""
+        # Qwen3.6-27b prepends a <think>...</think> block -- strip it for clean prose.
+        if "</think>" in text:
+            text = text.split("</think>", 1)[1].strip()
+        elif "<think>" in text:
+            text = text.split("<think>", 1)[0].strip()
+        return text

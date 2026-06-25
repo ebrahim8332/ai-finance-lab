@@ -33,7 +33,7 @@ def build_chain() -> list[BaseProvider]:
       [5]  gemini-2.0-flash            (deprecated June 2026, 8K output cap)
       [6]  gemini-2.0-flash-lite       (deprecated June 2026, 8K output cap)
       [7]  llama-3.3-70b-versatile     (Groq Tier 1)
-      [8]  llama-4-scout               (Groq Tier 2)
+      [8]  qwen3.6-27b              (Groq Tier 2)
       [9]  qwen3-32b                   (Groq Tier 3)
       [10] gpt-oss-120b                (Groq Tier 4)
       [11] llama-3.1-8b-instant        (Groq Tier 5)
